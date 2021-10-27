@@ -1,0 +1,170 @@
+service: cicdPipeline
+
+variablesResolutionMode: 20210326
+
+plugins:
+  - serverless-esbuild
+  - serverless-s3-cleaner
+  - serverless-iam-roles-per-function
+
+package:
+  individually: true
+  patterns:
+    - '!node_modules/**'
+    - '!.serverless/**'
+
+custom:
+  baseName: ${self:service}-${self:provider.stage}
+
+  esbuild:
+    target: node14
+    packager: yarn
+    minify: true
+    sourcemap: true
+    concurrency: 10
+  
+  serverless-s3-cleaner:
+    buckets:
+      - ${cf:${self:custom.baseName}.ServerlessDeploymentBucketName, ''}
+
+  serverless-iam-roles-per-function:
+    defaultInherit: true
+
+provider:
+  name: aws
+  region: ${opt:region, 'eu-west-1'}
+  stage: ${opt:stage, 'dev'}
+  stackName: ${self:custom.baseName}
+  deploymentBucket:
+    blockPublicAccess: true
+  runtime: nodejs14.x
+  memorySize: 128
+  timeout: 25
+  versionFunctions: false
+  logRetentionInDays: 7
+  logs:
+    httpApi: true
+  environment:
+    AWS_NODEJS_CONNECTION_REUSE_ENABLED: 1
+    NODE_OPTIONS: "--enable-source-maps"
+  httpApi:
+    disableDefaultEndpoint: false
+    shouldStartNameWithService: true
+    cors:
+      allowedOrigins:
+        - '*'
+      allowedMethods:
+        - POST
+      allowedHeaders:
+        - Content-Type
+
+
+functions:
+  add:
+    name: ${self:custom.baseName}-add
+    handler: src/add/index.handler
+    role: AddLambdaRole
+    events:
+      - httpApi:
+          path: /add
+          method: POST
+    environment:
+      TABLE_NAME: !Ref DynamoTable
+  catch:
+    name: ${self:custom.baseName}-catch
+    handler: src/catch/index.handler
+    role: CatchLambdaRole
+    events:
+      - httpApi: '*'
+
+
+resources:
+  Resources:
+    
+    # IAM
+
+    AddLambdaRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: ${self:custom.baseName}-add-role
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: ${self:custom.baseName}-add-policy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - logs:CreateLogGroup
+                    - logs:CreateLogStream
+                    - logs:PutLogEvents
+                  Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${self:custom.baseName}-add:log-stream:*
+                -  Effect: Allow
+                   Action:
+                     - dynamodb:PutItem
+                   Resource: !GetAtt DynamoTable.Arn
+
+    CatchLambdaRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: ${self:custom.baseName}-catch-role
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: ${self:custom.baseName}-catch-policy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - logs:CreateLogGroup
+                    - logs:CreateLogStream
+                    - logs:PutLogEvents
+                  Resource: !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/${self:custom.baseName}-catch:log-stream:*
+
+
+    # DynamoDB
+
+    DynamoTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: pk
+            AttributeType: S
+          - AttributeName: sk
+            AttributeType: S
+        KeySchema:
+          - AttributeName: pk
+            KeyType: HASH
+          - AttributeName: sk
+            KeyType: RANGE
+
+    # SSM
+
+    ApiEndpointParam:
+      Type: AWS::SSM::Parameter
+      Properties:
+        Name: /${self:service}/${self:provider.stage}/apiEndpoint
+        Type: String
+        Value: !Sub https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com
+
+    DynamoTableNameParam:
+      Type: AWS::SSM::Parameter
+      Properties:
+        Name: /${self:service}/${self:provider.stage}/tableName
+        Type: String
+        Value: !Ref DynamoTable

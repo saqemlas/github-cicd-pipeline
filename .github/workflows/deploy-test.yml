@@ -1,0 +1,65 @@
+name: 'CI/CD Pipeline: deploy test'
+
+on:
+  pull_request:
+    types:
+      - closed
+
+jobs:
+  deploy:
+    if: github.ref_name == 'main' && github.event.pull_request.merged == true
+
+    name: 'deploy test'
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+    - name: Branch Name
+      run: echo running on branch - ${{ github.ref_name }}
+
+    - name: Install Checkout
+      uses: actions/checkout@v2
+    
+    - name: Install Node
+      uses: actions/setup-node@v2
+      with:
+        node-version: '14'
+        cache: 'yarn'
+
+    - name: Set AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: eu-west-1
+        # role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+        # role-external-id: ${{ secrets.AWS_ROLE_EXTERNAL_ID }}
+        # role-duration-seconds: 1200
+        # role-session-name: MySessionName
+
+    - name: Install dependencies with a clean state
+      run: yarn run ci
+
+    - name: Audit dependencies
+      run: yarn run ci:audit
+
+    - name: Check Types
+      run: yarn run checktsc
+    
+    - name: Check Linter
+      run: yarn run lint
+    
+    - name: Run Unit Tests
+      run: yarn run test:unit
+    
+    - name: Deploy Stage
+      run: yarn run deploy --stage test --region eu-west-1
+    
+    - name: Run Integration Tests
+      run: yarn run test:integration --stage test --region eu-west-1
+    
+    - name: Run System Tests
+      run: yarn run test:system --stage test --region eu-west-1

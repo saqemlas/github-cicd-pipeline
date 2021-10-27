@@ -1,0 +1,50 @@
+name: 'CI/CD Pipeline: remove feature-branch'
+
+on:
+  pull_request:
+    types:
+      - closed
+
+jobs:
+  remove:
+    if: github.ref_name == 'main' && github.event.pull_request.head.ref != 'main' && github.event.pull_request.merged == true
+
+    name: 'remove feature branch'
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+    - name: Branch Name
+      run: echo running on branch - ${{ github.event.pull_request.head.ref }}
+
+    - name: Install Checkout
+      uses: actions/checkout@v2
+    
+    - name: Install Node
+      uses: actions/setup-node@v2
+      with:
+        node-version: '14'
+        cache: 'yarn'
+
+    - name: Set AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: eu-west-1
+        # role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+        # role-external-id: ${{ secrets.AWS_ROLE_EXTERNAL_ID }}
+        # role-duration-seconds: 1200
+        # role-session-name: MySessionName
+        
+    - name: Install dependencies with a clean state
+      run: yarn run ci
+    
+    - name: Remove Stage
+      run: yarn run remove --stage ${{ github.event.pull_request.head.ref }} --region eu-west-1
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

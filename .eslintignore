@@ -1,0 +1,9 @@
+.serverless
+node_modules
+coverage
+.esbuild
+
+.gitignore
+.eslintignore
+package.json
+tsconfig.json
